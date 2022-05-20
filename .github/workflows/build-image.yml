@@ -1,0 +1,14 @@
+name: Dnscrypt-proxy build and test image workflow
+
+on: [push]
+
+jobs:
+  build:
+    name: Build Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build image
+        run: docker compose build

@@ -1,0 +1,139 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dnscrypt-proxy-service
+  labels:
+    name: dnscrypt-proxy-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 53
+      targetPort: 5300
+      protocol: UDP
+  selector:
+    name: dnscrypt-proxy
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dnscrypt-acls-pvc
+spec:
+  resources:
+    requests:
+      storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnscrypt-proxy
+  labels:
+    name: dnscrypt-proxy
+spec:
+  strategy:
+    type: Recreate
+  replicas: 1
+  selector:
+    matchLabels:
+      name: dnscrypt-proxy
+  template:
+    metadata:
+      labels:
+        name: dnscrypt-proxy
+    spec:
+      containers:
+        - name: dnscrypt-proxy
+          image: goonnowgit/dnscrypt-proxy:2.1.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          args:
+          - -config
+          - /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+          ports:
+            - containerPort: 5300
+              protocol: TCP
+            - containerPort: 5300
+              protocol: UDP
+          livenessProbe:
+            exec:
+              command:
+              - /dnscrypt-proxy
+              - -config
+              - /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+              - -resolve
+              - www.google.com
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command:
+              - /dnscrypt-proxy
+              - -config
+              - /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+              - -resolve
+              - www.google.com
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - mountPath: /etc/dnscrypt-proxy
+              name: dnscrypt-proxy-config
+            - mountPath: /etc/dnscrypt-proxy/acls
+              name: dnscrypt-proxy-acls
+            - mountPath: /tmp
+              name: dnscrypt-proxy-tmp
+            - mountPath: /etc/dnscrypt-proxy/certs
+              name: dnscrypt-proxy-certs
+      initContainers:
+        - name: get-ip-blocklist
+          image: curlimages/curl
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          command:
+          - curl
+          args:
+          - "https://pgl.yoyo.org/adservers/iplist.php?ipformat=&showintro=1&mimetype=plaintext"
+          -  -o
+          - /etc/dnscrypt-proxy/acls/blocked-ips.txt
+          volumeMounts:
+            - name: dnscrypt-proxy-acls
+              mountPath: /etc/dnscrypt-proxy/acls
+        - name: get-domains-blocklist
+          image: curlimages/curl
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          command:
+          - curl
+          args:
+          - "https://download.dnscrypt.info/blocklists/domains/mybase.txt"
+          - -o
+          - /etc/dnscrypt-proxy/acls/blocked-names.txt
+          volumeMounts:
+            - name: dnscrypt-proxy-acls
+              mountPath: /etc/dnscrypt-proxy/acls
+      volumes:
+        - name: dnscrypt-proxy-config
+          configMap:
+            name: dnscrypt-proxy.config
+        - name: dnscrypt-proxy-acls
+          emptyDir: {}
+        - name: dnscrypt-proxy-tmp
+          emptyDir: {}
+        - name: dnscrypt-proxy-certs
+          secret:
+            secretName: dnscrypt-proxy.tls
